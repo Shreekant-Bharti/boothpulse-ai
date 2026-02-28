@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from transformers import pipeline
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -32,13 +32,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Templates
 templates = Jinja2Templates(directory="templates")
 
-# Load sentiment model once at startup
-print("🚀 Loading DistilBERT sentiment analysis model...")
-sentiment_analyzer = pipeline(
-    "sentiment-analysis",
-    model="distilbert-base-uncased-finetuned-sst-2-english",
-    device=-1  # CPU
-)
+# Load VADER sentiment analyzer (lightweight, ~1MB)
+print("🚀 Loading VADER sentiment analysis model...")
+sentiment_analyzer = SentimentIntensityAnalyzer()
 print("✅ Model loaded successfully!")
 
 # ==================== GEO DATA ====================
@@ -485,10 +481,20 @@ async def analyze_feedback(feedback: FeedbackInput):
     if not text:
         raise HTTPException(status_code=400, detail="Feedback text is required")
     
-    # Analyze sentiment
-    result = sentiment_analyzer(text[:512])[0]
-    raw_label = result["label"]
-    raw_score = result["score"]
+    # Analyze sentiment using VADER
+    scores = sentiment_analyzer.polarity_scores(text)
+    compound = scores['compound']
+    
+    # Map VADER compound score to sentiment label
+    if compound >= 0.05:
+        raw_label = "POSITIVE"
+        raw_score = (compound + 1) / 2  # Normalize to 0-1
+    elif compound <= -0.05:
+        raw_label = "NEGATIVE"
+        raw_score = (-compound + 1) / 2  # Normalize to 0-1
+    else:
+        raw_label = "NEUTRAL"
+        raw_score = 0.5
     
     # Map sentiment
     sentiment, confidence = map_sentiment(raw_label, raw_score)
